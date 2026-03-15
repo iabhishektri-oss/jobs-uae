@@ -1,55 +1,66 @@
 """
-Build a compact JSON for the website by merging CSV stats with AI exposure scores.
+Build compact JSON for the website merging CSV stats with AI exposure scores.
+UAE version: outputs pay in AED, ISCO-08 codes, MOHRE/FCSC employment data.
 
-Reads occupations.csv (for stats) and scores.json (for AI exposure).
-Writes site/data.json.
-
-Usage:
-    uv run python build_site_data.py
+Usage: uv run python build_site_data.py
 """
 
 import csv
 import json
+import os
+from collections import Counter
 
 
 def main():
-    # Load AI exposure scores
-    with open("scores.json") as f:
+    with open("scores.json", encoding="utf-8") as f:
         scores_list = json.load(f)
     scores = {s["slug"]: s for s in scores_list}
 
-    # Load CSV stats
-    with open("occupations.csv") as f:
+    with open("occupations.csv", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
 
-    # Merge
     data = []
     for row in rows:
         slug = row["slug"]
         score = scores.get(slug, {})
-        data.append({
-            "title": row["title"],
+
+        entry = {
             "slug": slug,
-            "category": row["category"],
-            "pay": int(row["median_pay_annual"]) if row["median_pay_annual"] else None,
-            "jobs": int(row["num_jobs_2024"]) if row["num_jobs_2024"] else None,
-            "outlook": int(row["outlook_pct"]) if row["outlook_pct"] else None,
-            "outlook_desc": row["outlook_desc"],
-            "education": row["entry_education"],
-            "exposure": score.get("exposure"),
-            "exposure_rationale": score.get("rationale"),
-            "url": row.get("url", ""),
-        })
+            "title": row.get("title", ""),
+            "isco_code": row.get("isco_code", ""),
+            "sector": row.get("sector", ""),
+            "pay_aed": row.get("median_pay_annual_aed", ""),
+            "emiratisation_rate": row.get("emiratisation_rate", ""),
+            "ai_impact": score.get("ai_impact", ""),
+            "automation_risk": score.get("automation_risk", ""),
+            "augmentation_potential": score.get("augmentation_potential", ""),
+            "timeline": score.get("timeline", ""),
+            "reasoning": score.get("reasoning", ""),
+        }
+        data.append(entry)
 
-    import os
+    # Summary stats
+    ai_impacts = [d["ai_impact"] for d in data if d["ai_impact"]]
+    impact_counts = Counter(ai_impacts)
+
+    site_data = {
+        "occupations": data,
+        "stats": {
+            "total": len(data),
+            "by_ai_impact": dict(impact_counts),
+        },
+    }
+
     os.makedirs("site", exist_ok=True)
-    with open("site/data.json", "w") as f:
-        json.dump(data, f)
+    out_path = os.path.join("site", "data.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(site_data, f, ensure_ascii=False, indent=2)
 
-    print(f"Wrote {len(data)} occupations to site/data.json")
-    total_jobs = sum(d["jobs"] for d in data if d["jobs"])
-    print(f"Total jobs represented: {total_jobs:,}")
+    print(f"Wrote {len(data)} occupations to {out_path}")
+    print("AI impact breakdown:")
+    for label, count in sorted(impact_counts.items()):
+        print(f"  {label}: {count}")
 
 
 if __name__ == "__main__":
