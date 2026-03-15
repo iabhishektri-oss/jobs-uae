@@ -205,6 +205,10 @@ canvas#canvas {
   top: 0;
   left: var(--sidebar-w);
   cursor: default;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
 }
 
 #tooltip {
@@ -615,12 +619,53 @@ function showTooltip(d, mx, my) {
   tt.querySelector(".tt-rationale").textContent =
     d.exposure_rationale || "";
 
-  const pad = 16;
-  let tx = mx + pad;
-  let ty = my - pad;
-  if (tx + 340 > window.innerWidth) tx = mx - 340 - pad;
-  if (ty < 10) ty = my + pad;
-  if (ty + 200 > window.innerHeight) ty = my - 200;
+  const ttW = tt.offsetWidth;
+  const ttH = tt.offsetHeight;
+  const pad = 28;
+
+  let tx, ty;
+
+  const matchesPortrait = window.innerHeight > window.innerWidth;
+  const fitsRight = mx + pad + ttW <= window.innerWidth;
+  const fitsLeft = mx - pad - ttW >= 0;
+  const fitsTop = my - pad - ttH >= 0;
+  const fitsBottom = my + pad + ttH <= window.innerHeight;
+
+  if (matchesPortrait) {
+    if (fitsTop) {
+      ty = my - pad - ttH;
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+    } else if (fitsBottom) {
+      ty = my + pad;
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+    } else if (fitsRight) {
+      tx = mx + pad;
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    } else if (fitsLeft) {
+      tx = mx - pad - ttW;
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    } else {
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    }
+  } else {
+    if (fitsRight) {
+      tx = mx + pad;
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    } else if (fitsLeft) {
+      tx = mx - pad - ttW;
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    } else if (fitsTop) {
+      ty = my - pad - ttH;
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+    } else if (fitsBottom) {
+      ty = my + pad;
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+    } else {
+      tx = Math.max(8, Math.min(window.innerWidth - ttW - 8, mx - ttW / 2));
+      ty = Math.max(8, Math.min(window.innerHeight - ttH - 8, my - ttH / 2));
+    }
+  }
 
   tt.style.left = tx + "px";
   tt.style.top = ty + "px";
@@ -939,6 +984,76 @@ canvas.addEventListener("mousemove", (e) => {
     hideTooltip();
     canvas.style.cursor = "default";
   }
+});
+
+let touchTimer = null;
+let isLongPress = false;
+let startTouch = null;
+let lastTouch = null;
+
+function handleTouch(x, y) {
+  const hit = currentView === "treemap" ? hitTest(x, y) : hitTestColumns(x, y);
+  if (hit !== hovered) {
+    hovered = hit;
+    currentView === "treemap" ? draw() : drawColumns();
+  }
+  if (hovered) {
+    showTooltip(hovered, x, y);
+  } else {
+    hideTooltip();
+  }
+}
+
+canvas.addEventListener("contextmenu", (e) => {
+  // Prevent native context menu on long press
+  e.preventDefault();
+});
+
+canvas.addEventListener("touchstart", (e) => {
+  if (e.touches.length !== 1) return;
+  lastTouch = e.touches[0];
+  startTouch = { x: lastTouch.clientX, y: lastTouch.clientY };
+  isLongPress = false;
+  
+  touchTimer = setTimeout(() => {
+    isLongPress = true;
+    handleTouch(lastTouch.clientX, lastTouch.clientY);
+  }, 400);
+});
+
+canvas.addEventListener("touchmove", (e) => {
+  if (e.touches.length !== 1) return;
+  lastTouch = e.touches[0];
+  
+  if (isLongPress) {
+    e.preventDefault(); // Prevent scrolling while dragging tooltip
+    handleTouch(lastTouch.clientX, lastTouch.clientY);
+  } else if (startTouch) {
+    const dx = lastTouch.clientX - startTouch.x;
+    const dy = lastTouch.clientY - startTouch.y;
+    if (Math.hypot(dx, dy) > 10) {
+      clearTimeout(touchTimer); // Cancel long press if moved too much
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchend", (e) => {
+  clearTimeout(touchTimer);
+  if (isLongPress) {
+    e.preventDefault(); // Prevent click event
+    hovered = null;
+    hideTooltip();
+    currentView === "treemap" ? draw() : drawColumns();
+  }
+  isLongPress = false;
+});
+
+canvas.addEventListener("touchcancel", (e) => {
+  clearTimeout(touchTimer);
+  isLongPress = false;
+  hovered = null;
+  hideTooltip();
+  currentView === "treemap" ? draw() : drawColumns();
 });
 
 canvas.addEventListener("click", (e) => {
