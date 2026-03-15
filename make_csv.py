@@ -1,10 +1,21 @@
 """
-Build a CSV summary of all occupations from the scraped HTML files.
+Build a CSV summary of all UAE occupations from scraped HTML files.
 
-Reads from html/<slug>.html, writes to occupations.csv.
+Reads from html/<slug>.html (MOHRE/FCSC/career pages), writes to occupations.csv.
+
+UAE-specific fields:
+  - isco_code: ISCO-08 4-digit occupation code (used by MOHRE UAE)
+  - sector: UAE economic sector (Finance, Construction, Hospitality, etc.)
+  - median_pay_annual_aed: Median annual pay in AED
+  - emiratisation_rate: % UAE national workforce (Emiratisation/Nafis data)
+
+Data sources:
+  - MOHRE: https://www.mohre.gov.ae/
+  - FCSC: https://www.fcsc.gov.ae/
+  - Wage Protection System / CBUAE data
 
 Usage:
-    uv run python make_csv.py
+  uv run python make_csv.py
 """
 
 import csv
@@ -18,24 +29,30 @@ def clean(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def parse_pay(value):
-    """Parse '62,350 per year $29.98 per hour' or '$23.33 per hour' into (annual, hourly)."""
-    annual = ""
-    hourly = ""
-    # Find all dollar amounts
-    amounts = re.findall(r'\$([\d,]+(?:\.\d+)?)', value)
-    if "per year" in value and "per hour" in value and len(amounts) >= 2:
-        annual = amounts[0].replace(",", "")
-        hourly = amounts[1].replace(",", "")
-    elif "per year" in value and amounts:
-        annual = amounts[0].replace(",", "")
-    elif "per hour" in value and amounts:
-        hourly = amounts[0].replace(",", "")
-    return annual, hourly
+def parse_aed_pay(value):
+    """Parse pay in AED from MOHRE/FCSC data."""
+    annual_aed = ""
+    monthly_aed = ""
+    value_clean = re.sub(r'[AEDaed,\s]', '', value)
+    amounts = re.findall(r'[\d]+(?:\.\d+)?', value_clean)
+    if "per year" in value.lower() or "annual" in value.lower():
+        if amounts:
+            annual_aed = amounts[0]
+    elif "per month" in value.lower() or "monthly" in value.lower():
+        if amounts:
+            monthly_aed = amounts[0]
+            annual_aed = str(round(float(monthly_aed) * 12))
+    elif amounts:
+        val = float(amounts[0])
+        if val > 50000:
+            annual_aed = amounts[0]
+        else:
+            monthly_aed = amounts[0]
+            annual_aed = str(round(val * 12))
+    return annual_aed, monthly_aed
 
 
 def parse_outlook(value):
-    """Parse '9% (Much faster than average)' into (pct, description)."""
     m = re.match(r'(-?\d+)%\s*\((.+)\)', value)
     if m:
         return m.group(1), m.group(2)
@@ -46,99 +63,64 @@ def parse_outlook(value):
 
 
 def parse_number(value):
-    """Strip commas and return a clean number string."""
-    cleaned = value.replace(",", "").strip()
-    # Handle negative numbers
+    cleaned = re.sub(r'[,\s]', '', str(value)).strip()
     if re.match(r'^-?\d+$', cleaned):
         return cleaned
     return value.strip()
 
 
 def extract_occupation(html_path, occ_meta):
-    """Extract one row of data from an HTML file."""
-    with open(html_path) as f:
+    with open(html_path, encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
 
     row = {
         "title": occ_meta["title"],
         "category": occ_meta["category"],
         "slug": occ_meta["slug"],
-        "url": occ_meta["url"],
-        "soc_code": "",
-        "median_pay_annual": "",
-        "median_pay_hourly": "",
+        "isco_code": occ_meta.get("isco_code", ""),
+        "sector": occ_meta.get("sector", ""),
+        "url": occ_meta.get("url", ""),
+        "median_pay_annual_aed": "",
+        "median_pay_monthly_aed": "",
         "entry_education": "",
-        "work_experience": "",
-        "training": "",
-        "num_jobs_2024": "",
-        "outlook_pct": "",
-        "outlook_desc": "",
-        "employment_change": "",
-        "projected_employment_2034": "",
+        "num_jobs": "",
+        "emiratisation_rate": "",
+        "growth_outlook_pct": "",
+        "growth_outlook_desc": "",
     }
 
-    # Quick Facts table
-    qf_table = soup.find("table", id="quickfacts")
-    if qf_table:
-        tbody = qf_table.find("tbody")
-        if tbody:
-            for tr in tbody.find_all("tr"):
-                th = tr.find("th")
-                td = tr.find("td")
-                if not th or not td:
-                    continue
-                field = clean(th.get_text()).lower()
-                value = clean(td.get_text())
-
-                if "median pay" in field:
-                    row["median_pay_annual"], row["median_pay_hourly"] = parse_pay(value)
-                elif "entry-level education" in field:
-                    row["entry_education"] = value
-                elif "work experience" in field:
-                    row["work_experience"] = value
-                elif "on-the-job training" in field:
-                    row["training"] = value
-                elif "number of jobs" in field:
-                    row["num_jobs_2024"] = parse_number(value)
-                elif "job outlook" in field:
-                    row["outlook_pct"], row["outlook_desc"] = parse_outlook(value)
-                elif "employment change" in field:
-                    row["employment_change"] = parse_number(value)
-
-    # Projections table (for SOC code and projected employment)
-    outlook_table = soup.find("table", id="outlook-table")
-    if outlook_table:
-        tbody = outlook_table.find("tbody")
-        if tbody:
-            tr = tbody.find("tr")
-            if tr:
-                cells = [clean(c.get_text()) for c in tr.find_all(["td", "th"])]
-                # cells: [Title, SOC, Emp2024, Emp2034, %change, numchange, ...]
-                if len(cells) >= 4:
-                    soc = cells[1]
-                    if soc != "—":
-                        row["soc_code"] = soc
-                    row["projected_employment_2034"] = parse_number(cells[3])
-
-    # Impute missing pay: annual <-> hourly using 2080 hours/year
-    if row["median_pay_annual"] and not row["median_pay_hourly"]:
-        row["median_pay_hourly"] = f"{float(row['median_pay_annual']) / 2080:.2f}"
-    elif row["median_pay_hourly"] and not row["median_pay_annual"]:
-        row["median_pay_annual"] = str(round(float(row["median_pay_hourly"]) * 2080))
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            cells = tr.find_all(["td", "th"])
+            if len(cells) < 2:
+                continue
+            field = clean(cells[0].get_text()).lower()
+            value = clean(cells[1].get_text())
+            if not value or value == "-":
+                continue
+            if any(k in field for k in ["salary", "pay", "wage", "earn", "aed"]):
+                row["median_pay_annual_aed"], row["median_pay_monthly_aed"] = parse_aed_pay(value)
+            elif any(k in field for k in ["education", "qualification"]):
+                row["entry_education"] = value
+            elif any(k in field for k in ["employment", "jobs", "workforce"]):
+                row["num_jobs"] = parse_number(value)
+            elif any(k in field for k in ["emiratisation", "nafis", "national"]):
+                row["emiratisation_rate"] = value
+            elif any(k in field for k in ["outlook", "growth", "projection"]):
+                row["growth_outlook_pct"], row["growth_outlook_desc"] = parse_outlook(value)
 
     return row
 
 
 def main():
-    with open("occupations.json") as f:
+    with open("occupations.json", encoding="utf-8") as f:
         occupations = json.load(f)
 
     fieldnames = [
-        "title", "category", "slug", "soc_code",
-        "median_pay_annual", "median_pay_hourly",
-        "entry_education", "work_experience", "training",
-        "num_jobs_2024", "projected_employment_2034",
-        "outlook_pct", "outlook_desc", "employment_change",
+        "title", "category", "slug", "isco_code", "sector",
+        "median_pay_annual_aed", "median_pay_monthly_aed",
+        "entry_education", "num_jobs", "emiratisation_rate",
+        "growth_outlook_pct", "growth_outlook_desc",
         "url",
     ]
 
@@ -148,21 +130,23 @@ def main():
         html_path = f"html/{occ['slug']}.html"
         if not os.path.exists(html_path):
             missing += 1
+            row = {f: occ.get(f, "") for f in fieldnames}
+            row.update({"median_pay_annual_aed": "", "median_pay_monthly_aed": "",
+                        "entry_education": "", "num_jobs": "", "emiratisation_rate": "",
+                        "growth_outlook_pct": "", "growth_outlook_desc": ""})
+            rows.append(row)
             continue
-        row = extract_occupation(html_path, occ)
-        rows.append(row)
+        rows.append(extract_occupation(html_path, occ))
 
-    with open("occupations.csv", "w", newline="") as f:
+    with open("occupations.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
     print(f"Wrote {len(rows)} rows to occupations.csv (missing HTML: {missing})")
-
-    # Quick sanity check
-    print(f"\nSample rows:")
     for r in rows[:3]:
-        print(f"  {r['title']}: ${r['median_pay_annual']}/yr, {r['num_jobs_2024']} jobs, {r['outlook_pct']}% outlook")
+        pay = r['median_pay_annual_aed']
+        print(f"  {r['title']}: AED {pay or 'unknown'}/yr, sector: {r['sector']}")
 
 
 if __name__ == "__main__":
