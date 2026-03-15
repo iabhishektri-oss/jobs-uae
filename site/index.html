@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Exposure of the US Job Market</title>
+<title>AI Exposure of the UAE Job Market</title>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -255,8 +255,8 @@ canvas#canvas {
 
 <div id="sidebar">
   <div>
-    <h1>AI Exposure of the US Job Market</h1>
-    <div class="subtitle">342 occupations &middot; color = AI exposure<br>Data from <a href="https://www.bls.gov/ooh/">BLS</a>, scored by Gemini Flash<br><a href="https://github.com/karpathy/jobs">GitHub</a></div>
+    <h1>AI Exposure of the UAE Job Market</h1>
+    <div class="subtitle">342 occupations &middot; color = AI exposure<br>Data from <a href="https://www.mohre.gov.ae/">MOHRE/FCSC</a>, scored by Gemini Flash<br><a href="https://github.com/iabhishektri-oss/jobs-uae">GitHub</a></div>
   </div>
 
   <div class="view-toggle">
@@ -585,7 +585,7 @@ function formatNumber(n) {
 
 function formatPay(n) {
   if (n == null) return "\u2014";
-  return "$" + n.toLocaleString();
+  return "AED " + n.toLocaleString();
 }
 
 function showTooltip(d, mx, my) {
@@ -867,11 +867,11 @@ function computeStats() {
 
   // Exposure by pay band
   const payBands = [
-    { label: "<$35K", min: 0, max: 35000 },
-    { label: "$35–50K", min: 35000, max: 50000 },
-    { label: "$50–75K", min: 50000, max: 75000 },
-    { label: "$75–100K", min: 75000, max: 100000 },
-    { label: "$100K+", min: 100000, max: Infinity },
+    { label: "<AED 130K", min: 0, max: 130000 },
+    { label: "AED 130–185K", min: 130000, max: 185000 },
+    { label: "AED 185–275K", min: 185000, max: 275000 },
+    { label: "AED 275–367K", min: 275000, max: 367000 },
+    { label: "AED 367K+", min: 367000, max: Infinity },
   ];
   const payChartEl = document.getElementById("payChart");
   payChartEl.innerHTML = payBands.map(band => {
@@ -921,7 +921,7 @@ function computeStats() {
   // Wages
   const trillions = wagesExposed / 1e12;
   document.getElementById("statWages").textContent =
-    "$" + trillions.toFixed(1) + "T";
+    "AED " + trillions.toFixed(1) + "T";
 }
 
 // ── Events ─────────────────────────────────────────────────────────────
